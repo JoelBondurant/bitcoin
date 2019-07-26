@@ -7,13 +7,13 @@
 
 #include <coins.h>
 #include <core_io.h>
-#include <interfaces/chain.h>
 #include <key_io.h>
-#include <keystore.h>
 #include <policy/policy.h>
 #include <primitives/transaction.h>
-#include <rpc/protocol.h>
+#include <rpc/request.h>
 #include <rpc/util.h>
+#include <script/sign.h>
+#include <script/signingprovider.h>
 #include <tinyformat.h>
 #include <univalue.h>
 #include <util/rbf.h>
@@ -149,7 +149,7 @@ static void TxInErrorToJSON(const CTxIn& txin, UniValue& vErrorsRet, const std::
     vErrorsRet.push_back(entry);
 }
 
-UniValue SignTransaction(CMutableTransaction& mtx, const UniValue& prevTxsUnival, CBasicKeyStore* keystore, std::map<COutPoint, Coin>& coins, bool is_temp_keystore, const UniValue& hashType)
+UniValue SignTransaction(CMutableTransaction& mtx, const UniValue& prevTxsUnival, FillableSigningProvider* keystore, std::map<COutPoint, Coin>& coins, bool is_temp_keystore, const UniValue& hashType)
 {
     // Add previous txouts given in the RPC call:
     if (!prevTxsUnival.isNull()) {
@@ -221,6 +221,9 @@ UniValue SignTransaction(CMutableTransaction& mtx, const UniValue& prevTxsUnival
                     keystore->AddCScript(witnessScript);
                     // Automatically also add the P2WSH wrapped version of the script (to deal with P2SH-P2WSH).
                     keystore->AddCScript(GetScriptForWitness(witnessScript));
+                }
+                if (rs.isNull() && ws.isNull()) {
+                    throw JSONRPCError(RPC_INVALID_PARAMETER, "Missing redeemScript/witnessScript");
                 }
             }
         }

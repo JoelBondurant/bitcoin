@@ -5,29 +5,21 @@
 #include <interfaces/wallet.h>
 
 #include <amount.h>
-#include <chain.h>
 #include <consensus/validation.h>
-#include <init.h>
 #include <interfaces/chain.h>
 #include <interfaces/handler.h>
-#include <net.h>
 #include <policy/feerate.h>
 #include <policy/fees.h>
-#include <policy/policy.h>
 #include <primitives/transaction.h>
-#include <rpc/server.h>
-#include <scheduler.h>
-#include <script/ismine.h>
 #include <script/standard.h>
 #include <support/allocators/secure.h>
 #include <sync.h>
-#include <timedata.h>
 #include <ui_interface.h>
 #include <uint256.h>
 #include <util/system.h>
-#include <validation.h>
 #include <wallet/feebumper.h>
 #include <wallet/fees.h>
+#include <wallet/ismine.h>
 #include <wallet/rpcwallet.h>
 #include <wallet/load.h>
 #include <wallet/wallet.h>
@@ -44,7 +36,7 @@ namespace {
 class PendingWalletTxImpl : public PendingWalletTx
 {
 public:
-    explicit PendingWalletTxImpl(CWallet& wallet) : m_wallet(wallet), m_key(&wallet) {}
+    explicit PendingWalletTxImpl(CWallet& wallet) : m_wallet(wallet) {}
 
     const CTransaction& get() override { return *m_tx; }
 
@@ -55,7 +47,7 @@ public:
         auto locked_chain = m_wallet.chain().lock();
         LOCK(m_wallet.cs_wallet);
         CValidationState state;
-        if (!m_wallet.CommitTransaction(m_tx, std::move(value_map), std::move(order_form), m_key, state)) {
+        if (!m_wallet.CommitTransaction(m_tx, std::move(value_map), std::move(order_form), state)) {
             reject_reason = state.GetRejectReason();
             return false;
         }
@@ -64,7 +56,6 @@ public:
 
     CTransactionRef m_tx;
     CWallet& m_wallet;
-    CReserveKey m_key;
 };
 
 //! Construct wallet tx struct.
@@ -148,9 +139,11 @@ public:
     void abortRescan() override { m_wallet->AbortRescan(); }
     bool backupWallet(const std::string& filename) override { return m_wallet->BackupWallet(filename); }
     std::string getWalletName() override { return m_wallet->GetName(); }
-    bool getKeyFromPool(bool internal, CPubKey& pub_key) override
+    bool getNewDestination(const OutputType type, const std::string label, CTxDestination& dest) override
     {
-        return m_wallet->GetKeyFromPool(pub_key, internal);
+        LOCK(m_wallet->cs_wallet);
+        std::string error;
+        return m_wallet->GetNewDestination(type, label, dest, error);
     }
     bool getPubKey(const CKeyID& address, CPubKey& pub_key) override { return m_wallet->GetPubKey(address, pub_key); }
     bool getPrivKey(const CKeyID& address, CKey& key) override { return m_wallet->GetKey(address, key); }
@@ -244,7 +237,7 @@ public:
         auto locked_chain = m_wallet->chain().lock();
         LOCK(m_wallet->cs_wallet);
         auto pending = MakeUnique<PendingWalletTxImpl>(*m_wallet);
-        if (!m_wallet->CreateTransaction(*locked_chain, recipients, pending->m_tx, pending->m_key, fee, change_pos,
+        if (!m_wallet->CreateTransaction(*locked_chain, recipients, pending->m_tx, fee, change_pos,
                 fail_reason, coin_control, sign)) {
             return {};
         }
@@ -484,7 +477,7 @@ public:
     }
     std::unique_ptr<Handler> handleStatusChanged(StatusChangedFn fn) override
     {
-        return MakeHandler(m_wallet->NotifyStatusChanged.connect([fn](CCryptoKeyStore*) { fn(); }));
+        return MakeHandler(m_wallet->NotifyStatusChanged.connect([fn](CWallet*) { fn(); }));
     }
     std::unique_ptr<Handler> handleAddressBookChanged(AddressBookChangedFn fn) override
     {
